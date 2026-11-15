@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Development wrapper. Build/test tooling runs inside podman; nothing is
+# installed on the host. `install`/`run` only use what GNOME already ships
+# (gjs, GTK 4, libadwaita, WebKitGTK 6.0) and write files under ~/.local.
+set -euo pipefail
+cd "$(dirname "$0")"
+IMAGE=whatsgnome-dev
+UUID=whatsgnome@dennis@damenmail.nl
+APP_ID=io.github.WhatsGnome
+DATA=${XDG_DATA_HOME:-$HOME/.local/share}
+
+run() { podman run --rm --userns=keep-id -v "$PWD":/src:Z -w /src "$@"; }
+need_image() { [ -n "$(podman images -q "$IMAGE")" ] || podman build -t "$IMAGE" -f Containerfile .; }
+
+desktop_entry() {
+  cat <<EOD
+[Desktop Entry]
+Type=Application
+Name=WhatsGnome
+Comment=WhatsApp Web for GNOME
+Exec=gjs -m $PWD/app/main.js %U
+Icon=$PWD/icons/whatsgnome.svg
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+StartupNotify=true
+DBusActivatable=true
+X-GNOME-UsesNotifications=true
+EOD
+}
+
+case "${1:-}" in
+  build-image) podman build -t "$IMAGE" -f Containerfile . ;;
+  test)        need_image; run "$IMAGE" gjs -m test/run.js ;;
+  coverage)
+    need_image; rm -rf coverage
+    run "$IMAGE" bash -c '
+      set -e
+      gjs --coverage-prefix=/src/lib --coverage-prefix=/src/app/lib --coverage-output=coverage -m test/run.js
+      genhtml -q -o coverage/html coverage/coverage.lcov
+      test/check-coverage.sh coverage/coverage.lcov 95' ;;
+  check)
+    # Loads the app modules (GTK/WebKit class registration, imports) headless.
+    need_image
+    run "$IMAGE" gjs -m test/check-imports.js ;;
+  pack)
+    need_image
+    run "$IMAGE" bash -c "rm -f $UUID.zip && zip -qr $UUID.zip metadata.json extension.js stylesheet.css lib icons app LICENSE && echo built $UUID.zip" ;;
+  install)
+    mkdir -p "$DATA/gnome-shell/extensions" "$DATA/applications" "$DATA/dbus-1/services"
+    ln -sfn "$PWD" "$DATA/gnome-shell/extensions/$UUID"
+    desktop_entry > "$DATA/applications/$APP_ID.desktop"
+    printf '[D-BUS Service]\nName=%s\nExec=gjs -m %s/app/main.js --gapplication-service\n' "$APP_ID" "$PWD" \
+      > "$DATA/dbus-1/services/$APP_ID.service"
+    if [ "${2:-}" = --autostart ]; then
+      mkdir -p "$HOME/.config/autostart"
+      desktop_entry | sed "s|^Exec=.*|Exec=gjs -m $PWD/app/main.js --background|; /^DBusActivatable/d" \
+        > "$HOME/.config/autostart/$APP_ID.desktop"
+    fi
+    echo "Installed. Log out and back in (Wayland), then: gnome-extensions enable $UUID" ;;
+  uninstall)
+    gnome-extensions disable "$UUID" 2>/dev/null || true
+    rm -f "$DATA/gnome-shell/extensions/$UUID" "$DATA/applications/$APP_ID.desktop" \
+      "$DATA/dbus-1/services/$APP_ID.service" "$HOME/.config/autostart/$APP_ID.desktop"
+    echo "Removed. Login data stays in $DATA/whatsgnome (delete it to unlink the device)." ;;
+  run)         WHATSGNOME_DEBUG=1 exec gjs -m app/main.js "${@:2}" ;;
+  logs)        exec journalctl -f -o cat /usr/bin/gnome-shell ;;
+  *) echo "usage: ./dev {build-image|test|coverage|check|pack|install [--autostart]|uninstall|run|logs}" >&2; exit 2 ;;
+esac

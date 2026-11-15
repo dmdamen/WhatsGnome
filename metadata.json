@@ -1,0 +1,7 @@
+{
+    "name": "WhatsGnome",
+    "description": "WhatsApp in the top bar: unread badge, show/hide window, recent chats with quick reply. Needs the bundled companion app (see README).",
+    "uuid": "whatsgnome@dennis@damenmail.nl",
+    "shell-version": ["47", "48", "49", "50", "51"],
+    "version": 1
+}

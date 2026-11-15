@@ -1,0 +1,22 @@
+.whatsgnome-icon-box { spacing: 0; }
+.whatsgnome-offline .whatsgnome-icon { opacity: 0.5; }
+
+.whatsgnome-badge {
+    background-color: #25d366;
+    color: #ffffff;
+    border-radius: 999px;
+    font-size: 0.75em;
+    font-weight: bold;
+    padding: 0 4px;
+    min-width: 8px;
+    margin-left: -6px;
+    margin-top: -8px;
+    text-align: center;
+}
+
+.whatsgnome-status { font-weight: bold; }
+.whatsgnome-preview { color: #9a9996; font-size: 0.9em; max-width: 320px; }
+.whatsgnome-unread { font-weight: bold; }
+.whatsgnome-muted { opacity: 0.7; }
+.whatsgnome-reply { min-width: 280px; }
+.whatsgnome-reply-status { font-size: 0.85em; color: #9a9996; }
