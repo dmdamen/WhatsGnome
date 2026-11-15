@@ -7,6 +7,23 @@ import GObject from 'gi://GObject';
 import System from 'system';
 
 import {APP_ID, IFACE_XML, OBJECT_PATH} from '../lib/dbus.js';
+import {newMessages} from './lib/parse.js';
+
+// Optional: without libgsound, notifications are silent.
+let GSound = null;
+try {
+    GSound = (await import('gi://GSound')).default;
+} catch {}
+
+const SOUND_EVENT = 'message-new-instant'; // from the user's sound theme
+const SOUND_MIN_INTERVAL_US = 2 * GLib.USEC_PER_SEC; // one sound per burst
+
+function settingsOrNull(schemaId, path = null) {
+    const schema = Gio.SettingsSchemaSource.get_default()?.lookup(schemaId, true);
+    if (!schema)
+        return null;
+    return new Gio.Settings({settings_schema: schema, ...(path ? {path} : {})});
+}
 import {WhatsAppWindow} from './window.js';
 
 const WhatsGnomeApp = GObject.registerClass(
@@ -15,6 +32,9 @@ class WhatsGnomeApp extends Adw.Application {
         super({application_id: APP_ID, flags: Gio.ApplicationFlags.DEFAULT_FLAGS});
         this._background = false;
         this._webNotifications = new Map(); // chat title -> WebKit.Notification
+        this._notified = new Set(); // chat titles with a notification showing
+        this._knownChats = null; // baseline for newMessages(); null until first chat list
+        this._lastSound = 0;
         this.add_main_option('background', 'b'.charCodeAt(0), GLib.OptionFlags.NONE, GLib.OptionArg.NONE,
             'Start hidden (e.g. at login)', null);
     }
@@ -42,6 +62,12 @@ class WhatsGnomeApp extends Adw.Application {
                 this._withdrawAll();
         });
         this._window.connect('web-notification', (_w, n) => this._onWebNotification(n));
+        this._initSound();
+        this._window.connect('notify::chats-json', () => this._onChatsChanged());
+        this._window.connect('notify::state', () => {
+            if (this._window.state !== 'ready')
+                this._knownChats = null; // reload/logout: don't replay old unread chats
+        });
     }
 
     vfunc_activate() {
@@ -136,7 +162,30 @@ class WhatsGnomeApp extends Adw.Application {
         }
     }
 
-    // WhatsApp Web only notifies while unfocused; forward to GNOME as native notifications.
+    // WhatsApp Web sends its notifications from a service worker, and WebKitGTK
+    // never delivers those to the app, so notify from the chat list instead:
+    // a chat whose unread count goes up while the window isn't focused.
+    _onChatsChanged() {
+        let chats;
+        try {
+            chats = JSON.parse(this._window.chats_json);
+        } catch {
+            return;
+        }
+        const fresh = newMessages(this._knownChats, chats);
+        this._knownChats = chats;
+        for (const c of chats) {
+            if (c.unread === 0 && this._notified.has(c.name))
+                this._withdraw(c.name); // read elsewhere, e.g. on the phone
+        }
+        if (this._window.is_active)
+            return; // like WhatsApp itself: no notifications while you're looking
+        for (const c of fresh)
+            this._notify(c.name, c.preview);
+    }
+
+    // Page-level web notifications, should WhatsApp send any. Same id per
+    // chat as _onChatsChanged, so the two never show duplicates.
     _onWebNotification(n) {
         const title = n.title || 'WhatsApp';
         this._webNotifications.set(title, n);
@@ -144,19 +193,72 @@ class WhatsGnomeApp extends Adw.Application {
             if (this._webNotifications.get(title) === n)
                 this._webNotifications.delete(title);
         });
+        this._notify(title, n.body);
+    }
+
+    _notify(title, body) {
         const g = new Gio.Notification();
         g.set_title(title);
-        if (n.body)
-            g.set_body(n.body);
+        if (body)
+            g.set_body(body);
         g.set_category?.('im.received');
-        g.set_default_action_and_target_value('app.open-chat', new GLib.Variant('s', title));
+        g.set_default_action_and_target('app.open-chat', new GLib.Variant('s', title));
         this.send_notification(`chat:${title}`, g);
+        this._notified.add(title);
+        this._playSound();
+    }
+
+    // GNOME Shell only plays sounds for freedesktop notifications, not for
+    // GNotification, so the app plays the theme's message sound itself.
+    _initSound() {
+        try {
+            this._sound = GSound ? new GSound.Context() : null;
+            this._sound?.init(null);
+        } catch (e) {
+            console.warn(`whatsgnome: no notification sound: ${e.message}`);
+            this._sound = null;
+        }
+        const slug = APP_ID.toLowerCase().replaceAll('.', '-');
+        this._notifySettings = settingsOrNull('org.gnome.desktop.notifications');
+        this._appNotifySettings = settingsOrNull('org.gnome.desktop.notifications.application',
+            `/org/gnome/desktop/notifications/application/${slug}/`);
+        this._soundSettings = settingsOrNull('org.gnome.desktop.sound');
+    }
+
+    // Respects Do Not Disturb, the app's "Sound Alerts" switch in Settings ›
+    // Notifications, and the system-wide alert sound setting.
+    _soundAllowed() {
+        return (this._notifySettings?.get_boolean('show-banners') ?? true) &&
+            (this._appNotifySettings?.get_boolean('enable') ?? true) &&
+            (this._appNotifySettings?.get_boolean('enable-sound-alerts') ?? true) &&
+            (this._soundSettings?.get_boolean('event-sounds') ?? true);
+    }
+
+    _playSound() {
+        const now = GLib.get_monotonic_time();
+        if (!this._sound || now - this._lastSound < SOUND_MIN_INTERVAL_US || !this._soundAllowed())
+            return;
+        this._lastSound = now;
+        try {
+            this._sound.play_simple({
+                [GSound.ATTR_EVENT_ID]: SOUND_EVENT,
+                [GSound.ATTR_EVENT_DESCRIPTION]: 'New WhatsApp message',
+            }, null);
+        } catch (e) {
+            console.warn(`whatsgnome: cannot play sound: ${e.message}`);
+        }
+    }
+
+    _withdraw(title) {
+        this.withdraw_notification(`chat:${title}`);
+        this._notified.delete(title);
+        this._webNotifications.delete(title);
     }
 
     _onNotificationClicked(title) {
         this.present();
-        this.withdraw_notification(`chat:${title}`);
         const n = this._webNotifications.get(title);
+        this._withdraw(title);
         if (n)
             n.clicked(); // lets WhatsApp open the right chat itself
         else
@@ -164,9 +266,8 @@ class WhatsGnomeApp extends Adw.Application {
     }
 
     _withdrawAll() {
-        for (const title of this._webNotifications.keys())
-            this.withdraw_notification(`chat:${title}`);
-        this._webNotifications.clear();
+        for (const title of new Set([...this._notified, ...this._webNotifications.keys()]))
+            this._withdraw(title);
     }
 });
 

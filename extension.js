@@ -17,6 +17,10 @@ import {buildViewModel} from './lib/viewmodel.js';
 
 const BridgeProxy = Gio.DBusProxy.makeProxyWrapper(IFACE_XML);
 
+// Module state survives disable/enable (e.g. screen lock), so the app is only
+// autostarted once per session and stays quit if the user quits it.
+let autostarted = false;
+
 // GNOME 48 replaced St.BoxLayout:vertical with :orientation (51 removed it).
 function vbox(params) {
     const box = new St.BoxLayout(params);
@@ -26,6 +30,22 @@ function vbox(params) {
         box.vertical = true;
     return box;
 }
+
+// The user's double-click time in ms (Clutter.Settings moved onto the context).
+function doubleClickTime() {
+    const settings = global.stage.context?.get_settings?.() ?? Clutter.Settings.get_default();
+    return settings.double_click_time;
+}
+
+// Reports every press with its button. ClickGesture can't be used: it ignores
+// a second press that falls inside the double-click time.
+const PanelPress = GObject.registerClass({
+    Signals: {'pressed': {param_types: [GObject.TYPE_UINT]}},
+}, class PanelPress extends Clutter.PressGesture {
+    vfunc_press() {
+        this.emit('pressed', this.get_button());
+    }
+});
 
 const ReplyItem = GObject.registerClass(
 class ReplyItem extends PopupMenu.PopupBaseMenuItem {
@@ -90,15 +110,18 @@ class Indicator extends PanelMenu.Button {
         box.add_child(this._badge);
         this.add_child(box);
 
-        // Left click shows/hides the window; right click (or touch) opens the menu.
-        // GNOME 51 opens the menu from a ClickGesture on any button; swap it for
-        // one that routes by button. Older shells go through vfunc_event below.
+        // A click (any button, or touch) toggles the menu; a double left click
+        // shows WhatsApp. GNOME 51 opens the menu from its own ClickGesture;
+        // swap it for ours. Older shells go through vfunc_event below.
         if (this._clickGesture) {
             this._clickGesture.enabled = false;
-            this._routedClick = new Clutter.ClickGesture({recognize_on_press: true});
-            this._routedClick.connect('recognize', g => this._onPress(g.get_button()));
+            this._routedClick = new PanelPress();
+            this._routedClick.connect('pressed', (_g, button) => this._onPress(button));
             this.add_action(this._routedClick);
         }
+
+        this._clickTimeoutId = 0;
+        this.connect('destroy', () => this._cancelPendingClick());
 
         this.menu.connect('open-state-changed', (_m, open) => {
             if (open || this._dirty)
@@ -106,11 +129,29 @@ class Indicator extends PanelMenu.Button {
         });
     }
 
+    // A left click waits out the double-click time before opening the menu:
+    // once the menu is open its grab swallows the next press, so a double
+    // click could not be seen. Other buttons and touch open it right away.
     _onPress(button) {
-        if (button === Clutter.BUTTON_PRIMARY && !this.menu.isOpen)
-            this._ext.toggleWindow();
-        else
+        if (button !== Clutter.BUTTON_PRIMARY) {
+            this._cancelPendingClick();
             this.menu.toggle();
+        } else if (this._clickTimeoutId) {
+            this._cancelPendingClick();
+            this._ext.showWindow();
+        } else {
+            this._clickTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, doubleClickTime(), () => {
+                this._clickTimeoutId = 0;
+                this.menu.toggle();
+                return GLib.SOURCE_REMOVE;
+            });
+        }
+    }
+
+    _cancelPendingClick() {
+        if (this._clickTimeoutId)
+            GLib.source_remove(this._clickTimeoutId);
+        this._clickTimeoutId = 0;
     }
 
     vfunc_event(event) {
@@ -118,9 +159,8 @@ class Indicator extends PanelMenu.Button {
         // vfunc_event to chain up to (calling it throws on every event).
         if (this._routedClick)
             return Clutter.EVENT_PROPAGATE;
-        if (event.type() === Clutter.EventType.BUTTON_PRESS &&
-            event.get_button() === Clutter.BUTTON_PRIMARY && !this.menu.isOpen) {
-            this._ext.toggleWindow();
+        if (event.type() === Clutter.EventType.BUTTON_PRESS) {
+            this._onPress(event.get_button());
             return Clutter.EVENT_STOP;
         }
         return super.vfunc_event(event);
@@ -206,6 +246,26 @@ export default class WhatsGnomeExtension extends Extension {
         this._refresh();
         this._watch = Gio.bus_watch_name(Gio.BusType.SESSION, BUS_NAME, Gio.BusNameWatcherFlags.NONE,
             () => this._onAppeared(), () => this._onVanished());
+        if (!autostarted) {
+            autostarted = true;
+            this._startInBackground();
+        }
+    }
+
+    // Starts the app hidden via D-Bus activation (the service file from
+    // `./dev install`), falling back to running it directly. A no-op if it's
+    // already running.
+    _startInBackground() {
+        Gio.DBus.session.call('org.freedesktop.DBus', '/org/freedesktop/DBus',
+            'org.freedesktop.DBus', 'StartServiceByName', new GLib.Variant('(su)', [BUS_NAME, 0]),
+            null, Gio.DBusCallFlags.NONE, -1, this._cancellable, (conn, res) => {
+                try {
+                    conn.call_finish(res);
+                } catch (e) {
+                    if (!e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                        this.launchApp(true);
+                }
+            });
     }
 
     disable() {
@@ -269,9 +329,9 @@ export default class WhatsGnomeExtension extends Extension {
         }
     }
 
-    toggleWindow() {
+    showWindow() {
         if (this._proxy?.g_name_owner)
-            this.call('Toggle');
+            this.call('Show');
         else
             this.launchApp(false);
     }

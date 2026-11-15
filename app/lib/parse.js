@@ -74,3 +74,14 @@ export function isInternalUri(uri) {
     const host = m[1].toLowerCase();
     return host === 'web.whatsapp.com' || host.endsWith('.whatsapp.net');
 }
+
+// Chats that got new unread messages between two chat lists, skipping muted
+// ones. WhatsApp Web shows its notifications from a service worker, which
+// WebKitGTK never hands to the app, so the app derives them from the chat list.
+// prev === null means no baseline yet (first load): report nothing.
+export function newMessages(prev, next) {
+    if (!prev || !Array.isArray(next))
+        return [];
+    const before = new Map(prev.map(c => [c.name, c.unread]));
+    return next.filter(c => !c.muted && c.unread > (before.get(c.name) ?? 0));
+}

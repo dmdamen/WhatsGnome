@@ -1,23 +1,25 @@
 # WhatsGnome
 
+![The WhatsGnome menu in the top bar: an unread badge, recent chats, and a quick-reply field](docs/screenshot.png)
+
 WhatsApp for GNOME, in two parts:
 
-- **Companion app** (`app/`): a GJS + GTK 4 + WebKitGTK 6.0 window that runs WhatsApp Web, sends messages as native GNOME notifications, and exposes its state over D-Bus (`io.github.WhatsGnome`, see `lib/dbus.js`).
-- **Shell extension** (repo root): a top-bar icon with an unread badge. **Left click** shows or hides the window. **Right click** opens the menu of recent chats, where each chat expands to a quick-reply field.
+- **Companion app** (`app/`): a GJS + GTK 4 + WebKitGTK 6.0 window that runs WhatsApp Web, sends new messages as native GNOME notifications with a sound, and exposes its state over D-Bus (`io.github.WhatsGnome`, see `lib/dbus.js`).
+- **Shell extension** (repo root): a top-bar icon with an unread badge. **Click** opens the menu of recent chats, where each chat expands to a quick-reply field. **Double-click** shows the WhatsApp window.
 
 GNOME Shell can't host a web view, and WhatsApp has no API for personal accounts, so the app is required.
 
 ## Install
 
 ```sh
-./dev install              # or: ./dev install --autostart  (starts hidden at login)
+./dev install
 # log out and back in (Wayland), then:
 gnome-extensions enable whatsgnome@dennis@damenmail.nl
 ```
 
 `install` only writes files under `~/.local`: the extension symlink, a `.desktop` file (GNOME needs it to show notifications), and a D-Bus activation file. At runtime it uses the GNOME stack that's already installed (gjs, GTK 4, libadwaita, webkitgtk6.0).
 
-Open WhatsGnome and scan the QR code with your phone. The session is stored in `~/.local/share/whatsgnome`.
+The extension starts the app hidden when you log in (once per session: if you quit it, it stays quit until the next login). Open WhatsGnome and scan the QR code with your phone. The session is stored in `~/.local/share/whatsgnome`.
 
 ## Development
 
@@ -34,6 +36,8 @@ All build and test tooling runs in podman. Nothing is installed on the host.
 
 ### When WhatsApp Web changes
 
-The chat list and quick reply work by scraping the page DOM. Every selector is in the `SEL` block at the top of `app/bridge.js`. If the chat list or sending stops working, run `./dev run`, inspect the page, and update `SEL`. The unread badge comes from the page title and notifications come from WebKit, so those two don't depend on selectors.
+The chat list and quick reply work by scraping the page DOM. Every selector is in the `SEL` block at the top of `app/bridge.js`. If the chat list or sending stops working, run `./dev run`, inspect the page, and update `SEL`. The unread badge comes from the page title, so it doesn't depend on selectors. Notifications do: WhatsApp Web shows its own from a service worker, which WebKitGTK never passes to the app, so the app notifies when a chat's unread count goes up in the scraped chat list.
+
+The notification sound is the `message-new-instant` event from your sound theme, played with libgsound. It follows Do Not Disturb, WhatsGnome's *Sound Alerts* switch in Settings › Notifications, and the system alert sound setting.
 
 If WhatsApp says the browser is unsupported, set a newer Chrome user agent with `WHATSGNOME_UA=...`.

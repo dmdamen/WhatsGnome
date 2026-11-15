@@ -1,5 +1,5 @@
 import {describe, it, expect} from './harness.js';
-import {isInternalUri, normalizeChats, parseUnreadBadge, parseUnreadFromTitle, sameChats, MAX_PREVIEW} from '../app/lib/parse.js';
+import {isInternalUri, newMessages, normalizeChats, parseUnreadBadge, parseUnreadFromTitle, sameChats, MAX_PREVIEW} from '../app/lib/parse.js';
 
 describe('parseUnreadFromTitle', () => {
     it('reads the count prefix', () => expect(parseUnreadFromTitle('(12) WhatsApp')).toBe(12));
@@ -73,4 +73,21 @@ describe('isInternalUri', () => {
         expect(isInternalUri('not a uri')).toBeFalsy();
         expect(isInternalUri(null)).toBeFalsy();
     });
+});
+
+describe('newMessages', () => {
+    const chat = (name, unread, muted = false) => ({name, preview: `hi ${name}`, unread, muted});
+
+    it('reports nothing without a baseline', () =>
+        expect(newMessages(null, [chat('A', 3)])).toEqual([]));
+    it('reports chats whose unread count went up', () =>
+        expect(newMessages([chat('A', 0), chat('B', 1)], [chat('B', 2), chat('A', 0)]).map(c => c.name)).toEqual(['B']));
+    it('reports chats that newly appear with unread messages', () =>
+        expect(newMessages([chat('A', 0)], [chat('C', 1), chat('A', 0)]).map(c => c.name)).toEqual(['C']));
+    it('skips muted chats', () =>
+        expect(newMessages([chat('A', 0)], [chat('A', 4, true)])).toEqual([]));
+    it('ignores chats being read', () =>
+        expect(newMessages([chat('A', 2)], [chat('A', 0)])).toEqual([]));
+    it('handles a bad list', () =>
+        expect(newMessages([], null)).toEqual([]));
 });
