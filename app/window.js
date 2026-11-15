@@ -74,6 +74,13 @@ export const WhatsAppWindow = GObject.registerClass({
             enable_webrtc: true,
         });
 
+        // WebKitGTK forgets granted notification permission on every restart,
+        // and WhatsApp only asks again when you click its "turn on desktop
+        // notifications" banner, so messages arrived silently. Grant it up front
+        // (must be connected before the web process starts).
+        WebKit.WebContext.get_default().connect('initialize-notification-permissions', ctx =>
+            ctx.initialize_notification_permissions([WebKit.SecurityOrigin.new_for_uri(URL)], []));
+
         this._web = new WebKit.WebView({
             network_session: session, user_content_manager: ucm, settings,
             vexpand: true, hexpand: true,

@@ -1,6 +1,9 @@
-.whatsgnome-icon-box { spacing: 0; }
 .whatsgnome-offline .whatsgnome-icon { opacity: 0.5; }
+/* Room on the right for the badge to sit over the icon's corner. */
+.whatsgnome-badged .whatsgnome-icon { margin-right: 10px; }
 
+/* Positioned by the BinLayout in extension.js. No negative margins: St treats
+   them as unsigned and the badge ends up billions of pixels wide. */
 .whatsgnome-badge {
     background-color: #25d366;
     color: #ffffff;
@@ -9,8 +12,7 @@
     font-weight: bold;
     padding: 0 4px;
     min-width: 8px;
-    margin-left: -6px;
-    margin-top: -8px;
+    margin-top: 2px;
     text-align: center;
 }
 

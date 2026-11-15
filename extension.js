@@ -68,15 +68,37 @@ class Indicator extends PanelMenu.Button {
         this._vm = null;
         this._dirty = false;
 
-        const box = new St.BoxLayout({style_class: 'whatsgnome-icon-box', y_align: Clutter.ActorAlign.CENTER});
+        // The badge overlaps the icon's top-right corner. Overlay it with a
+        // BinLayout: St reads negative CSS margins as unsigned, which made the
+        // badge ~4 billion px wide and broke the whole panel's layout.
+        const box = new St.Widget({
+            style_class: 'whatsgnome-icon-box',
+            layout_manager: new Clutter.BinLayout(),
+            y_align: Clutter.ActorAlign.CENTER,
+        });
         this._icon = new St.Icon({
             gicon: Gio.FileIcon.new(ext.dir.resolve_relative_path('icons/whatsgnome-symbolic.svg')),
             style_class: 'system-status-icon whatsgnome-icon',
         });
-        this._badge = new St.Label({style_class: 'whatsgnome-badge', y_align: Clutter.ActorAlign.START, visible: false});
+        this._badge = new St.Label({
+            style_class: 'whatsgnome-badge',
+            x_align: Clutter.ActorAlign.END,
+            y_align: Clutter.ActorAlign.START,
+            visible: false,
+        });
         box.add_child(this._icon);
         box.add_child(this._badge);
         this.add_child(box);
+
+        // Left click shows/hides the window; right click (or touch) opens the menu.
+        // GNOME 51 opens the menu from a ClickGesture on any button; swap it for
+        // one that routes by button. Older shells go through vfunc_event below.
+        if (this._clickGesture) {
+            this._clickGesture.enabled = false;
+            this._routedClick = new Clutter.ClickGesture({recognize_on_press: true});
+            this._routedClick.connect('recognize', g => this._onPress(g.get_button()));
+            this.add_action(this._routedClick);
+        }
 
         this.menu.connect('open-state-changed', (_m, open) => {
             if (open || this._dirty)
@@ -84,8 +106,18 @@ class Indicator extends PanelMenu.Button {
         });
     }
 
-    // Left click shows/hides the window; right click (or touch) opens the menu.
+    _onPress(button) {
+        if (button === Clutter.BUTTON_PRIMARY && !this.menu.isOpen)
+            this._ext.toggleWindow();
+        else
+            this.menu.toggle();
+    }
+
     vfunc_event(event) {
+        // GNOME 51+: input is handled by gestures and there is no parent
+        // vfunc_event to chain up to (calling it throws on every event).
+        if (this._routedClick)
+            return Clutter.EVENT_PROPAGATE;
         if (event.type() === Clutter.EventType.BUTTON_PRESS &&
             event.get_button() === Clutter.BUTTON_PRIMARY && !this.menu.isOpen) {
             this._ext.toggleWindow();
@@ -98,6 +130,10 @@ class Indicator extends PanelMenu.Button {
         this._vm = vm;
         this._badge.text = vm.badge;
         this._badge.visible = Boolean(vm.badge);
+        if (vm.badge)
+            this.add_style_class_name('whatsgnome-badged');
+        else
+            this.remove_style_class_name('whatsgnome-badged');
         if (vm.running)
             this.remove_style_class_name('whatsgnome-offline');
         else
