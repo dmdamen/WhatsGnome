@@ -109,8 +109,12 @@
 
     function click(el) {
         // WhatsApp's React handlers listen for mousedown, not just click.
-        const target = el.querySelector('[role="gridcell"], [tabindex]') ?? el;
-        const opts = {bubbles: true, cancelable: true, view: window, button: 0};
+        // Fire on the innermost element so the events bubble past every layer
+        // that might own the handler (WhatsApp moved it below the gridcell).
+        const target = el.querySelector(SEL.rowTitles) ?? el.querySelector('[role="gridcell"], [tabindex]') ?? el;
+        const r = target.getBoundingClientRect();
+        const opts = {bubbles: true, cancelable: true, composed: true, view: window, button: 0, buttons: 1,
+            clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, pointerType: 'mouse', isPrimary: true};
         for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'])
             target.dispatchEvent(new (type.startsWith('pointer') ? PointerEvent : MouseEvent)(type, opts));
     }
@@ -120,14 +124,24 @@
         return t ? t.getAttribute('title') || t.textContent : null;
     }
 
+    const fail = text => {
+        post({type: 'log', text});
+        return false;
+    };
+
     async function openChat(name) {
         if (currentChat() === name && document.querySelector(SEL.composer))
             return true;
         const row = findRow(name);
         if (!row)
-            return false;
+            return fail(`openChat: no chat row titled ${JSON.stringify(name)}`);
         click(row);
-        return Boolean(await waitFor(() => currentChat() === name && document.querySelector(SEL.composer)));
+        if (await waitFor(() => currentChat() === name && document.querySelector(SEL.composer)))
+            return true;
+        const header = document.querySelector('#main header');
+        return fail(`openChat: chat did not open; current=${JSON.stringify(currentChat())} ` +
+            `composer=${Boolean(document.querySelector(SEL.composer))} main=${Boolean(document.querySelector('#main'))} ` +
+            `header=${header ? header.outerHTML.slice(0, 1500) : null}`);
     }
 
     async function send(name, text) {
@@ -147,7 +161,9 @@
             box.dispatchEvent(new KeyboardEvent('keydown', ev));
         }
         // Sent once the composer is empty again.
-        return Boolean(await waitFor(() => !box.isConnected || !box.textContent.trim(), 3000));
+        if (await waitFor(() => !box.isConnected || !box.textContent.trim(), 3000))
+            return true;
+        return fail(`send: composer not cleared; sendButton=${Boolean(btn)}`);
     }
 
     window.whatsgnome = {openChat, send, refresh: () => { lastChats = null; report(); }};

@@ -163,6 +163,8 @@ export const WhatsAppWindow = GObject.registerClass({
                 this._chats = chats;
                 this.notify('chats-json');
             }
+        } else if (msg.type === 'log') {
+            console.warn(`whatsgnome: ${msg.text}`);
         }
     }
 
