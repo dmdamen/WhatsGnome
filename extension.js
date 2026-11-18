@@ -47,6 +47,19 @@ const PanelPress = GObject.registerClass({
     }
 });
 
+// A round profile photo, as GNOME's own user avatars do it: a background image
+// clipped by border-radius. Chats without a photo get a person icon.
+function avatarWidget(path) {
+    const bin = new St.Bin({style_class: 'whatsgnome-avatar', y_align: Clutter.ActorAlign.CENTER});
+    if (path) {
+        bin.style = `background-image: url("${path.replace(/["\\]/g, '\\$&')}");`;
+    } else {
+        bin.add_style_class_name('whatsgnome-avatar-default');
+        bin.child = new St.Icon({icon_name: 'avatar-default-symbolic', style_class: 'whatsgnome-avatar-icon'});
+    }
+    return bin;
+}
+
 const ReplyItem = GObject.registerClass(
 class ReplyItem extends PopupMenu.PopupBaseMenuItem {
     _init(onSend) {
@@ -211,7 +224,8 @@ class Indicator extends PanelMenu.Button {
     }
 
     _chatItem(chat) {
-        const item = new PopupMenu.PopupSubMenuMenuItem(chat.label);
+        const item = new PopupMenu.PopupSubMenuMenuItem(chat.label, true);
+        item.replace_child(item.icon, avatarWidget(chat.avatar));
         if (chat.unread)
             item.label.add_style_class_name('whatsgnome-unread');
         if (chat.muted)

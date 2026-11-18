@@ -33,6 +33,17 @@ describe('buildViewModel', () => {
         expect(vm.status).toBe('2 unread chats');
         expect(vm.chats.map(c => c.label)).toEqual(['c0', 'c1 (1)', 'c2']);
     });
+    it('passes cached avatar files through', () => {
+        const json = JSON.stringify([
+            {name: 'a', avatar: '/home/u/.cache/whatsgnome/avatars/ab.jpg'},
+            {name: 'b', avatar: ''},
+            {name: 'c', avatar: 'https://pps.whatsapp.net/x.jpg'},
+            {name: 'd', avatar: '/home/u/../../etc/x.jpg'},
+            {name: 'e'},
+        ]);
+        expect(buildViewModel(true, {State: 'ready', Chats: json}).chats.map(c => c.avatar))
+            .toEqual(['/home/u/.cache/whatsgnome/avatars/ab.jpg', '', '', '', '']);
+    });
     it('uses singular for one chat', () =>
         expect(buildViewModel(true, {State: 'ready', UnreadCount: 1}).status).toBe('1 unread chat'));
     it('says so when nothing is unread', () =>

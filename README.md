@@ -1,11 +1,11 @@
 # WhatsGnome
 
-![The WhatsGnome menu in the top bar: an unread badge, recent chats, and a quick-reply field](docs/screenshot.png)
+![The WhatsGnome menu in the top bar: an unread badge, recent chats with profile photos, and a quick-reply field](docs/screenshot.png)
 
 WhatsApp for GNOME, in two parts:
 
 - **Companion app** (`app/`): a GJS + GTK 4 + WebKitGTK 6.0 window that runs WhatsApp Web, sends new messages as native GNOME notifications with a sound, and exposes its state over D-Bus (`io.github.WhatsGnome`, see `lib/dbus.js`).
-- **Shell extension** (repo root): a top-bar icon with an unread badge. **Click** opens the menu of recent chats, where each chat expands to a quick-reply field. **Double-click** shows the WhatsApp window.
+- **Shell extension** (repo root): a top-bar icon with an unread badge. **Click** opens the menu of recent chats with their profile photos, where each chat expands to a quick-reply field. **Double-click** shows the WhatsApp window.
 
 GNOME Shell can't host a web view, and WhatsApp has no API for personal accounts, so the app is required.
 
@@ -36,7 +36,7 @@ All build and test tooling runs in podman. Nothing is installed on the host.
 
 ### When WhatsApp Web changes
 
-The chat list and quick reply work by scraping the page DOM. Every selector is in the `SEL` block at the top of `app/bridge.js`. If the chat list or sending stops working, run `./dev run`, inspect the page, and update `SEL`. The unread badge comes from the page title, so it doesn't depend on selectors. Notifications do: WhatsApp Web shows its own from a service worker, which WebKitGTK never passes to the app, so the app notifies when a chat's unread count goes up in the scraped chat list.
+The chat list and quick reply work by scraping the page DOM. Every selector is in the `SEL` block at the top of `app/bridge.js`. If the chat list or sending stops working, run `./dev run`, inspect the page, and update `SEL`. Profile photos are downloaded from WhatsApp's CDN into `~/.cache/whatsgnome/avatars` (files unused for 30 days are removed). The unread badge comes from the page title, so it doesn't depend on selectors. Notifications do: WhatsApp Web shows its own from a service worker, which WebKitGTK never passes to the app, so the app notifies when a chat's unread count goes up in the scraped chat list.
 
 The notification sound is the `message-new-instant` event from your sound theme, played with libgsound. It follows Do Not Disturb, WhatsGnome's *Sound Alerts* switch in Settings › Notifications, and the system alert sound setting.
 

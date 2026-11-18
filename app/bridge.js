@@ -16,6 +16,7 @@
         rowTitles: 'span[title]',
         rowBadge: '[aria-label*="unread" i], span[data-testid="icon-unread-count"]',
         rowMuted: '[data-icon*="muted" i]',
+        rowAvatar: 'img[src]',
         loginQr: 'canvas[aria-label], [data-ref]',
         mainHeaderTitle: '#main header span[title], #main header [dir="auto"]',
         composer: '#main footer [contenteditable="true"]',
@@ -64,6 +65,7 @@
                 preview: titles[1] ?? '',
                 badge: badge ? badge.getAttribute('aria-label') || badge.textContent : null,
                 muted: Boolean(row.querySelector(SEL.rowMuted)),
+                avatar: row.querySelector(SEL.rowAvatar)?.src ?? '',
                 y: rowY(row),
             };
         });

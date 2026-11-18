@@ -16,6 +16,15 @@
     text-align: center;
 }
 
+.whatsgnome-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 99px;
+    background-size: cover;
+}
+.whatsgnome-avatar-default { background-color: rgba(255, 255, 255, 0.12); }
+.whatsgnome-avatar-icon { icon-size: 18px; color: rgba(255, 255, 255, 0.7); }
+
 .whatsgnome-status { font-weight: bold; }
 .whatsgnome-preview { color: #9a9996; font-size: 0.9em; max-width: 320px; }
 .whatsgnome-unread { font-weight: bold; }

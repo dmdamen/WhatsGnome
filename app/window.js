@@ -6,6 +6,7 @@ import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk?version=4.0';
 import WebKit from 'gi://WebKit?version=6.0';
 
+import {AvatarCache} from './avatars.js';
 import {isInternalUri, normalizeChats, parseUnreadFromTitle, sameChats} from './lib/parse.js';
 
 const URL = 'https://web.whatsapp.com/';
@@ -53,7 +54,10 @@ export const WhatsAppWindow = GObject.registerClass({
         super({application: app, title: 'WhatsApp', default_width: 1100, default_height: 800, hide_on_close: true});
         this._state = 'loading';
         this._unread = 0;
-        this._chats = [];
+        this._chats = []; // published over D-Bus: {name, preview, unread, muted, avatar}
+        this._scrapedChats = []; // as scraped, with avatarUrl instead of avatar
+        this._avatars = new AvatarCache(GLib.build_filenamev([dataDir('cache'), 'avatars']),
+            () => this._publishChats());
 
         const session = WebKit.NetworkSession.new(dataDir('data'), dataDir('cache'));
         session.connect('download-started', (_s, download) => this._onDownload(download));
@@ -147,6 +151,16 @@ export const WhatsAppWindow = GObject.registerClass({
         }
     }
 
+    // Swaps each photo URL for its cached file ('' until downloaded). Signed
+    // URLs change on their own, so comparing after the swap avoids churn.
+    _publishChats() {
+        const chats = this._scrapedChats.map(({avatarUrl, ...c}) => ({...c, avatar: this._avatars.lookup(avatarUrl)}));
+        if (!sameChats(chats, this._chats)) {
+            this._chats = chats;
+            this.notify('chats-json');
+        }
+    }
+
     _onBridgeMessage(value) {
         let msg;
         try {
@@ -158,11 +172,8 @@ export const WhatsAppWindow = GObject.registerClass({
         if (msg.type === 'state') {
             this._setState(msg.state);
         } else if (msg.type === 'chats') {
-            const chats = normalizeChats(msg.rows, MAX_CHATS);
-            if (!sameChats(chats, this._chats)) {
-                this._chats = chats;
-                this.notify('chats-json');
-            }
+            this._scrapedChats = normalizeChats(msg.rows, MAX_CHATS);
+            this._publishChats();
         } else if (msg.type === 'log') {
             console.warn(`whatsgnome: ${msg.text}`);
         }

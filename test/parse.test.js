@@ -1,5 +1,5 @@
 import {describe, it, expect} from './harness.js';
-import {isInternalUri, newMessages, normalizeChats, parseUnreadBadge, parseUnreadFromTitle, sameChats, MAX_PREVIEW} from '../app/lib/parse.js';
+import {avatarKey, isInternalUri, newMessages, normalizeChats, parseUnreadBadge, parseUnreadFromTitle, sameChats, MAX_PREVIEW} from '../app/lib/parse.js';
 
 describe('parseUnreadFromTitle', () => {
     it('reads the count prefix', () => expect(parseUnreadFromTitle('(12) WhatsApp')).toBe(12));
@@ -33,7 +33,13 @@ describe('normalizeChats', () => {
         expect(normalizeChats([row('A', 0), row('B', 1), row('C', 2)], 2).length).toBe(2));
     it('parses unread and muted', () =>
         expect(normalizeChats([row('A', 0, {badge: '2 unread messages', muted: 1})])[0])
-            .toEqual({name: 'A', preview: 'hi A', unread: 2, muted: true}));
+            .toEqual({name: 'A', preview: 'hi A', unread: 2, muted: true, avatarUrl: ''}));
+    it('keeps CDN avatar URLs only', () => {
+        const cdn = 'https://media-ams2-1.cdn.whatsapp.net/v/t61/123_n.jpg?oh=x&oe=y';
+        const [a, b] = normalizeChats([row('A', 0, {avatar: cdn}), row('B', 1, {avatar: 'data:image/gif;base64,R0lG'})]);
+        expect(a.avatarUrl).toBe(cdn);
+        expect(b.avatarUrl).toBe('');
+    });
     it('strips direction marks and collapses whitespace', () =>
         expect(normalizeChats([row('‪Mom‬', 0, {preview: 'a \n  b'})])[0].preview).toBe('a b'));
     it('truncates long previews', () => {
@@ -90,4 +96,21 @@ describe('newMessages', () => {
         expect(newMessages([chat('A', 2)], [chat('A', 0)])).toEqual([]));
     it('handles a bad list', () =>
         expect(newMessages([], null)).toEqual([]));
+});
+
+describe('avatarKey', () => {
+    it('uses the path of CDN URLs', () =>
+        expect(avatarKey('https://media-ams2-1.cdn.whatsapp.net/v/t61/123_n.jpg?oh=a&oe=b')).toBe('/v/t61/123_n.jpg'));
+    it('ignores the signature', () =>
+        expect(avatarKey('https://pps.whatsapp.net/v/1.jpg?oh=a')).toBe(avatarKey('https://pps.whatsapp.net/v/1.jpg?oh=b')));
+    it('rejects other hosts and schemes', () => {
+        expect(avatarKey('https://evil.example/v/1.jpg')).toBe(null);
+        expect(avatarKey('https://whatsapp.net.evil.example/v/1.jpg')).toBe(null);
+        expect(avatarKey('http://pps.whatsapp.net/v/1.jpg')).toBe(null);
+        expect(avatarKey('data:image/gif;base64,R0lG')).toBe(null);
+    });
+    it('rejects empty paths and junk', () => {
+        expect(avatarKey('https://pps.whatsapp.net/')).toBe(null);
+        expect(avatarKey(null)).toBe(null);
+    });
 });

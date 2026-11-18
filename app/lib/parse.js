@@ -51,11 +51,23 @@ export function normalizeChats(rows, limit = 10) {
             preview: truncate(clean(r.preview), MAX_PREVIEW),
             unread: parseUnreadBadge(r.badge),
             muted: Boolean(r.muted),
+            avatarUrl: avatarKey(r.avatar) ? r.avatar : '',
         });
         if (out.length >= limit)
             break;
     }
     return out;
+}
+
+// Profile photos are signed CDN URLs: the query (signature, expiry) changes
+// over time while the path names the photo. Returns the path as a stable cache
+// key, or null for anything that isn't an https whatsapp.net URL (such as the
+// 1×1 placeholder GIF shown while a photo loads).
+export function avatarKey(url) {
+    const m = /^https:\/\/([^/?#:@]+)(?::\d+)?(\/[^?#]*)/i.exec(String(url ?? ''));
+    if (!m || !/(^|\.)whatsapp\.net$/i.test(m[1]) || m[2] === '/')
+        return null;
+    return m[2];
 }
 
 export function sameChats(a, b) {
